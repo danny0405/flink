@@ -22,10 +22,12 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.metrics.Meter;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.streaming.connectors.elasticsearch.util.MetricUtils;
 import org.apache.flink.util.InstantiationUtil;
 
 import org.elasticsearch.action.ActionRequest;
@@ -202,6 +204,13 @@ public abstract class ElasticsearchSinkBase<T, C extends AutoCloseable> extends 
 	 */
 	private final AtomicReference<Throwable> failureThrowable = new AtomicReference<>();
 
+	// ------------------------------------------------------------------------
+	//  Metrics
+	// ------------------------------------------------------------------------
+	private Meter outTps;
+	private Meter outBps;
+	private MetricUtils.LatencyGauge latencyGauge;
+
 	public ElasticsearchSinkBase(
 		ElasticsearchApiCallBridge<C> callBridge,
 		Map<String, String> userConfig,
@@ -300,6 +309,9 @@ public abstract class ElasticsearchSinkBase<T, C extends AutoCloseable> extends 
 		bulkProcessor = buildBulkProcessor(new BulkProcessorListener());
 		requestIndexer = callBridge.createBulkProcessorIndexer(bulkProcessor, flushOnCheckpoint, numPendingRequests);
 		failureRequestIndexer = new BufferingNoOpRequestIndexer();
+		outTps = MetricUtils.registerOutTps(getRuntimeContext());
+		outBps = MetricUtils.registerOutBps(getRuntimeContext(), "elasticsearch");
+		latencyGauge = MetricUtils.registerOutLatency(getRuntimeContext());
 	}
 
 	@Override
@@ -388,8 +400,12 @@ public abstract class ElasticsearchSinkBase<T, C extends AutoCloseable> extends 
 	}
 
 	private class BulkProcessorListener implements BulkProcessor.Listener {
+		private long bulkStartsTime = 0L;
+
 		@Override
-		public void beforeBulk(long executionId, BulkRequest request) { }
+		public void beforeBulk(long executionId, BulkRequest request) {
+			bulkStartsTime = System.currentTimeMillis();
+		}
 
 		@Override
 		public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
@@ -418,6 +434,11 @@ public abstract class ElasticsearchSinkBase<T, C extends AutoCloseable> extends 
 					// if the failure handler decides to throw an exception
 					failureThrowable.compareAndSet(null, t);
 				}
+			} else {
+				outTps.markEvent(request.numberOfActions());
+				// rough estimate each row 1000 bytes
+				outBps.markEvent(request.numberOfActions() * 1000);
+				latencyGauge.report(System.currentTimeMillis() - bulkStartsTime);
 			}
 
 			if (flushOnCheckpoint) {

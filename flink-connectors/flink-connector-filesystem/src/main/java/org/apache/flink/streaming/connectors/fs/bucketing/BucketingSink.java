@@ -25,6 +25,7 @@ import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.InputTypeConfigurable;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.metrics.Meter;
 import org.apache.flink.runtime.fs.hdfs.HadoopFileSystem;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -37,6 +38,7 @@ import org.apache.flink.streaming.connectors.fs.RollingSink;
 import org.apache.flink.streaming.connectors.fs.SequenceFileWriter;
 import org.apache.flink.streaming.connectors.fs.StringWriter;
 import org.apache.flink.streaming.connectors.fs.Writer;
+import org.apache.flink.streaming.connectors.fs.util.MetricUtils;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeCallback;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.util.Preconditions;
@@ -323,6 +325,13 @@ public class BucketingSink<T>
 
 	private transient ProcessingTimeService processingTimeService;
 
+	// ------------------------------------------------------------------------
+	//  Metrics
+	// ------------------------------------------------------------------------
+	private Meter outTps;
+	private Meter outBps;
+	private MetricUtils.LatencyGauge latencyGauge;
+
 	/**
 	 * Creates a new {@code BucketingSink} that writes files to the given base directory.
 	 *
@@ -420,6 +429,9 @@ public class BucketingSink<T>
 				return processingTimeService.getCurrentProcessingTime();
 			}
 		};
+		outTps = MetricUtils.registerOutTps(getRuntimeContext());
+		outBps = MetricUtils.registerOutBps(getRuntimeContext(), "bucketing-sink");
+		latencyGauge = MetricUtils.registerOutLatency(getRuntimeContext());
 	}
 
 	/**
@@ -457,8 +469,14 @@ public class BucketingSink<T>
 		if (shouldRoll(bucketState, currentProcessingTime)) {
 			openNewPartFile(bucketPath, bucketState);
 		}
-
+		long beforeTime = System.currentTimeMillis();
 		bucketState.writer.write(value);
+		long afterTime = System.currentTimeMillis();
+		// update metrics, this may cause performance regression.
+		outTps.markEvent(1);
+		// rough estimate each row 1000 bytes
+		outBps.markEvent(1000);
+		latencyGauge.report(afterTime - beforeTime);
 		bucketState.lastWrittenToTime = currentProcessingTime;
 	}
 
