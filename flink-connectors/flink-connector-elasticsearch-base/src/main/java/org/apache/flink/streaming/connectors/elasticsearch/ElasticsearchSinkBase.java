@@ -438,7 +438,9 @@ public abstract class ElasticsearchSinkBase<T, C extends AutoCloseable> extends 
 				outTps.markEvent(request.numberOfActions());
 				// rough estimate each row 1000 bytes
 				outBps.markEvent(request.numberOfActions() * 1000);
-				latencyGauge.report(System.currentTimeMillis() - bulkStartsTime);
+				long interval = System.currentTimeMillis() - bulkStartsTime;
+				latencyGauge.report(interval);
+				LOG.info("========== report latency gauge " + interval + " milliseconds.");
 			}
 
 			if (flushOnCheckpoint) {
