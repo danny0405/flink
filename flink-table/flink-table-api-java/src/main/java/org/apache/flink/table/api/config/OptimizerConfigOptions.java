@@ -97,4 +97,13 @@ public class OptimizerConfigOptions {
 		key("table.optimizer.join-reorder-enabled")
 			.defaultValue(false)
 			.withDescription("Enables join reorder in optimizer. Default is disabled.");
+
+	@Documentation.TableOption(execMode = Documentation.ExecMode.BATCH_STREAMING)
+	public static final ConfigOption<Boolean> TABLE_OPTIMIZER_DYNAMIC_TABLE_OPTIONS_ENABLED =
+		key("table.optimizer.dynamic-table-options.enabled")
+			.booleanType()
+			.defaultValue(false)
+			.withDescription("Enable or disable the OPTIONS hint used to specify table options" +
+				"dynamically, if disabled, an exception would be thrown " +
+				"if any OPTIONS hint is specified");
 }

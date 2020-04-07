@@ -29,7 +29,7 @@ import org.apache.flink.table.api.java.StreamTableEnvironment
 import org.apache.flink.table.api.scala.{StreamTableEnvironment => ScalaStreamTableEnvironment, _}
 import org.apache.flink.table.planner.runtime.utils.TestingAppendSink
 import org.apache.flink.table.planner.utils.TableTestUtil.{readFromResource, replaceStageId}
-import org.apache.flink.table.planner.utils.TestTableSources.getPersonCsvTableSource
+import org.apache.flink.table.planner.utils.TestTableSourceSinks.getPersonCsvTableSource
 import org.apache.flink.table.sinks.CsvTableSink
 import org.apache.flink.types.Row
 import org.apache.flink.util.FileUtils
