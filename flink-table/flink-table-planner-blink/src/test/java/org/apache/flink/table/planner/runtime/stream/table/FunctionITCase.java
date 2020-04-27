@@ -31,7 +31,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+import java.time.LocalTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.flink.table.api.Expressions.$;
@@ -126,6 +128,27 @@ public class FunctionITCase extends StreamingTestBase {
 		tEnv().execute("Test Job");
 	}
 
+	@Test
+	public void testTimeScalarFunction() throws Exception {
+		int nanoOfDay = 10 * 1_000_000;
+		final List<Row> sourceData = Collections.singletonList(
+				Row.of(LocalTime.ofNanoOfDay(nanoOfDay))
+		);
+
+		TestCollectionTableFactory.reset();
+		TestCollectionTableFactory.initData(sourceData);
+
+		tEnv().sqlUpdate("CREATE TABLE SourceTable(s TIME(0)) WITH ('connector' = 'COLLECTION')");
+		tEnv().sqlUpdate("CREATE TABLE SinkTable(s BIGINT) WITH ('connector' = 'COLLECTION')");
+
+		tEnv().from("SourceTable")
+				.select(call(new TimeScalarFunction(), $("s")))
+				.insertInto("SinkTable");
+		tEnv().execute("Test Job");
+
+		assertThat(TestCollectionTableFactory.getResult().toString(), equalTo("[10000000]"));
+	}
+
 	// --------------------------------------------------------------------------------------------
 	// Test functions
 	// --------------------------------------------------------------------------------------------
@@ -160,6 +183,15 @@ public class FunctionITCase extends StreamingTestBase {
 			} else {
 				collect(Row.of(s, s.split(",")));
 			}
+		}
+	}
+
+	/**
+	 * Scala function that extracts the time as nanos of day.
+	 */
+	public static class TimeScalarFunction extends ScalarFunction {
+		public Long eval(@DataTypeHint("TIME(0)") LocalTime time) {
+			return time.toNanoOfDay();
 		}
 	}
 }

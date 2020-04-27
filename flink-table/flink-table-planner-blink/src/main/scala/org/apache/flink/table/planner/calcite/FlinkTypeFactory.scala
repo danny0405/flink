@@ -77,7 +77,8 @@ class FlinkTypeFactory(typeSystem: RelDataTypeSystem)
 
       // temporal types
       case LogicalTypeRoot.DATE => createSqlType(DATE)
-      case LogicalTypeRoot.TIME_WITHOUT_TIME_ZONE => createSqlType(TIME)
+      case LogicalTypeRoot.TIME_WITHOUT_TIME_ZONE =>
+        createSqlType(TIME, t.asInstanceOf[TimeType].getPrecision)
       case LogicalTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE =>
         val lzTs = t.asInstanceOf[LocalZonedTimestampType]
         createSqlType(TIMESTAMP_WITH_LOCAL_TIME_ZONE, lzTs.getPrecision)
@@ -451,8 +452,7 @@ object FlinkTypeFactory {
           throw new TableException(
             s"TIME precision is not supported: ${relDataType.getPrecision}")
         }
-        // blink runner support precision 3, but for consistent with flink runner, we set to 0.
-        new TimeType()
+        new TimeType(relDataType.getPrecision)
       case TIMESTAMP =>
         new TimestampType(relDataType.getPrecision)
       case TIMESTAMP_WITH_LOCAL_TIME_ZONE =>
