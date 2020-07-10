@@ -95,7 +95,7 @@ public class AvroRowDataSerializationSchema implements SerializationSchema<RowDa
 	private transient Encoder encoder;
 
 	/**
-	 * Creates an Avro serialization schema for the given specific record class.
+	 * Creates an Avro serialization schema with the given record row type.
 	 */
 	public AvroRowDataSerializationSchema(RowType rowType) {
 		this.rowType = Preconditions.checkNotNull(rowType, "RowType cannot be null.");
@@ -104,7 +104,7 @@ public class AvroRowDataSerializationSchema implements SerializationSchema<RowDa
 
 	@Override
 	public void open(InitializationContext context) throws Exception {
-		this.schema = AvroSchemaConverter.convertToSchema(rowType);
+		this.schema = generatesAvroSchema();
 		datumWriter = new SpecificDatumWriter<>(schema);
 		arrayOutputStream = new ByteArrayOutputStream();
 		encoder = EncoderFactory.get().binaryEncoder(arrayOutputStream, null);
@@ -139,6 +139,39 @@ public class AvroRowDataSerializationSchema implements SerializationSchema<RowDa
 	@Override
 	public int hashCode() {
 		return Objects.hash(rowType);
+	}
+
+	/**
+	 * Generates Avro schema used for serialization.
+	 *
+	 * <p>The default behavior infers the schema from the give logical row type.
+	 */
+	protected Schema generatesAvroSchema() {
+		return AvroSchemaConverter.convertToSchema(rowType);
+	}
+
+	// --------------------------------------------------------------------------------
+	// Setter/Getter
+	// --------------------------------------------------------------------------------
+
+	protected ByteArrayOutputStream getOutputStream() {
+		return arrayOutputStream;
+	}
+
+	protected Encoder getEncoder() {
+		return encoder;
+	}
+
+	protected Schema getSchema() {
+		return schema;
+	}
+
+	protected DatumWriter<IndexedRecord> getDatumWriter() {
+		return datumWriter;
+	}
+
+	protected SerializationRuntimeConverter getRuntimeConverter() {
+		return runtimeConverter;
 	}
 
 	// --------------------------------------------------------------------------------

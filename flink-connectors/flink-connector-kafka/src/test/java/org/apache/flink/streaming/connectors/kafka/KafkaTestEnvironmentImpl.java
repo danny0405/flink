@@ -143,6 +143,7 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
 		standardProps.setProperty("enable.auto.commit", "false");
 		standardProps.setProperty("zookeeper.session.timeout.ms", String.valueOf(zkTimeout));
 		standardProps.setProperty("zookeeper.connection.timeout.ms", String.valueOf(zkTimeout));
+		standardProps.setProperty("zookeeper.connect", zookeeperConnectionString);
 		standardProps.setProperty("auto.offset.reset", "earliest"); // read from the beginning.
 		standardProps.setProperty("max.partition.fetch.bytes", "256"); // make a lot of fetches (MESSAGES MUST BE SMALLER!)
 	}

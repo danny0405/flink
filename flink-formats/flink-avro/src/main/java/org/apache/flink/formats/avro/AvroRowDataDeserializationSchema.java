@@ -133,7 +133,7 @@ public class AvroRowDataDeserializationSchema implements DeserializationSchema<R
 
 	@Override
 	public void open(InitializationContext context) throws Exception {
-		final Schema schema = AvroSchemaConverter.convertToSchema(rowType);
+		final Schema schema = generatesAvroSchema();
 		this.record = new GenericData.Record(schema);
 		this.datumReader = new SpecificDatumReader<>(schema);
 		this.inputStream = new MutableByteArrayInputStream();
@@ -177,6 +177,39 @@ public class AvroRowDataDeserializationSchema implements DeserializationSchema<R
 	@Override
 	public int hashCode() {
 		return Objects.hash(rowType, typeInfo);
+	}
+
+	/**
+	 * Generates Avro schema used for deserialization.
+	 *
+	 * <p>The default behavior infers the schema from the give logical row type.
+	 */
+	protected Schema generatesAvroSchema() {
+		return AvroSchemaConverter.convertToSchema(rowType);
+	}
+
+	// -------------------------------------------------------------------------------------
+	// Setter/Getter
+	// -------------------------------------------------------------------------------------
+
+	protected MutableByteArrayInputStream getInputStream() {
+		return inputStream;
+	}
+
+	protected DatumReader<IndexedRecord> getDatumReader() {
+		return datumReader;
+	}
+
+	protected IndexedRecord getRecord() {
+		return record;
+	}
+
+	protected Decoder getDecoder() {
+		return decoder;
+	}
+
+	protected DeserializationRuntimeConverter getRuntimeConverter() {
+		return runtimeConverter;
 	}
 
 	// -------------------------------------------------------------------------------------

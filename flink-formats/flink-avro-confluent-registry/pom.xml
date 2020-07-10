@@ -30,7 +30,7 @@ under the License.
 	<artifactId>flink-avro-confluent-registry</artifactId>
 
 	<properties>
-		<confluent.schema.registry.version>4.1.0</confluent.schema.registry.version>
+		<confluent.schema.registry.version>5.5.1</confluent.schema.registry.version>
 	</properties>
 
 	<repositories>
@@ -67,7 +67,42 @@ under the License.
 			<artifactId>flink-avro</artifactId>
 			<version>${project.version}</version>
 		</dependency>
-	</dependencies>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-table-api-java</artifactId>
+			<version>${project.version}</version>
+			<scope>provided</scope>
+		</dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-common</artifactId>
+            <version>${project.version}</version>
+	        <scope>provided</scope>
+        </dependency>
+
+		<!-- test dependencies -->
+
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-table-api-java</artifactId>
+			<version>${project.version}</version>
+			<scope>test</scope>
+			<type>test-jar</type>
+		</dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-runtime-blink_2.11</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-table-common</artifactId>
+			<version>${project.version}</version>
+			<scope>test</scope>
+			<type>test-jar</type>
+		</dependency>
+    </dependencies>
 
 	<build>
 		<plugins>
