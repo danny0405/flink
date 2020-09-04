@@ -124,7 +124,7 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
 	// Utility Classes
 	// ----------------------------------------------------------------------------------------
 
-	private class JoinConditionWithNullFilters extends AbstractRichFunction implements JoinCondition {
+	protected class JoinConditionWithNullFilters extends AbstractRichFunction implements JoinCondition {
 
 		final JoinCondition backingJoinCondition;
 
