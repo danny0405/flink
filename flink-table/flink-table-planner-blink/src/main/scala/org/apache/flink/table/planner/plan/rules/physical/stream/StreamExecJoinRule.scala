@@ -24,7 +24,8 @@ import org.apache.flink.table.planner.plan.`trait`.FlinkRelDistribution
 import org.apache.flink.table.planner.plan.nodes.FlinkConventions
 import org.apache.flink.table.planner.plan.nodes.logical.{FlinkLogicalJoin, FlinkLogicalRel, FlinkLogicalSnapshot}
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamExecJoin
-import org.apache.flink.table.planner.plan.utils.{TemporalJoinUtil, IntervalJoinUtil}
+import org.apache.flink.table.planner.plan.utils.JoinUtil.toHashTraitByColumns
+import org.apache.flink.table.planner.plan.utils.{IntervalJoinUtil, TemporalJoinUtil}
 
 import org.apache.calcite.plan.RelOptRule.{any, operand}
 import org.apache.calcite.plan.{RelOptRule, RelOptRuleCall, RelTraitSet}
@@ -101,19 +102,6 @@ class StreamExecJoinRule
     val join: FlinkLogicalJoin = call.rel(0)
     val left = join.getLeft
     val right = join.getRight
-
-    def toHashTraitByColumns(
-        columns: util.Collection[_ <: Number],
-        inputTraitSets: RelTraitSet): RelTraitSet = {
-      val distribution = if (columns.isEmpty) {
-        FlinkRelDistribution.SINGLETON
-      } else {
-        FlinkRelDistribution.hash(columns)
-      }
-      inputTraitSets
-        .replace(FlinkConventions.STREAM_PHYSICAL)
-        .replace(distribution)
-    }
 
     val joinInfo = join.analyzeCondition()
     val (leftRequiredTrait, rightRequiredTrait) = (

@@ -26,7 +26,6 @@ import org.apache.flink.table.planner.delegation.StreamPlanner
 import org.apache.flink.table.planner.plan.nodes.common.CommonPhysicalJoin
 import org.apache.flink.table.planner.plan.nodes.exec.{ExecNode, StreamExecNode}
 import org.apache.flink.table.planner.plan.utils.{JoinUtil, KeySelectorUtil}
-import org.apache.flink.table.runtime.operators.join.stream.state.JoinInputSideSpec
 import org.apache.flink.table.runtime.operators.join.stream.{StreamingJoinOperator, StreamingSemiAntiJoinOperator}
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo
 
@@ -56,25 +55,6 @@ class StreamExecJoin(
   extends CommonPhysicalJoin(cluster, traitSet, leftRel, rightRel, condition, joinType)
   with StreamPhysicalRel
   with StreamExecNode[RowData] {
-
-  def inputUniqueKeyContainsJoinKey(inputOrdinal: Int): Boolean = {
-    val input = getInput(inputOrdinal)
-    val inputUniqueKeys = getCluster.getMetadataQuery.getUniqueKeys(input)
-    if (inputUniqueKeys != null) {
-      val joinKeys = if (inputOrdinal == 0) {
-        // left input
-        keyPairs.map(_.source).toArray
-      } else {
-        // right input
-        keyPairs.map(_.target).toArray
-      }
-      inputUniqueKeys.exists {
-        uniqueKey => joinKeys.forall(uniqueKey.toArray.contains(_))
-      }
-    } else {
-      false
-    }
-  }
 
   override def requireWatermark: Boolean = false
 
@@ -186,45 +166,5 @@ class StreamExecJoin(
     ret.setStateKeySelectors(leftSelect, rightSelect)
     ret.setStateKeyType(leftSelect.getProducedType)
     ret
-  }
-
-  private def analyzeJoinInput(input: RelNode): JoinInputSideSpec = {
-    val uniqueKeys = cluster.getMetadataQuery.getUniqueKeys(input)
-    if (uniqueKeys == null || uniqueKeys.isEmpty) {
-      JoinInputSideSpec.withoutUniqueKey()
-    } else {
-      val inRowType = InternalTypeInfo.of(FlinkTypeFactory.toLogicalRowType(input.getRowType))
-      val joinKeys = if (input == left) {
-        keyPairs.map(_.source).toArray
-      } else {
-        keyPairs.map(_.target).toArray
-      }
-      val uniqueKeysContainedByJoinKey = uniqueKeys
-        .filter(uk => uk.toArray.forall(joinKeys.contains(_)))
-        .map(_.toArray)
-        .toArray
-      if (uniqueKeysContainedByJoinKey.nonEmpty) {
-        // join key contains unique key
-        val smallestUniqueKey = getSmallestKey(uniqueKeysContainedByJoinKey)
-        val uniqueKeySelector = KeySelectorUtil.getRowDataSelector(smallestUniqueKey, inRowType)
-        val uniqueKeyTypeInfo = uniqueKeySelector.getProducedType
-        JoinInputSideSpec.withUniqueKeyContainedByJoinKey(uniqueKeyTypeInfo, uniqueKeySelector)
-      } else {
-        val smallestUniqueKey = getSmallestKey(uniqueKeys.map(_.toArray).toArray)
-        val uniqueKeySelector = KeySelectorUtil.getRowDataSelector(smallestUniqueKey, inRowType)
-        val uniqueKeyTypeInfo = uniqueKeySelector.getProducedType
-        JoinInputSideSpec.withUniqueKey(uniqueKeyTypeInfo, uniqueKeySelector)
-      }
-    }
-  }
-
-  private def getSmallestKey(keys: Array[Array[Int]]): Array[Int] = {
-    var smallest = keys.head
-    for (key <- keys) {
-      if (key.length < smallest.length) {
-        smallest = key
-      }
-    }
-    smallest
   }
 }

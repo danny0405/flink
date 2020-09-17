@@ -41,6 +41,8 @@ import org.apache.calcite.sql.`type`.SqlTypeUtil
 import org.apache.calcite.tools.RelBuilder
 import org.apache.calcite.util.ImmutableBitSet
 
+import java.util.Collections
+
 import _root_.scala.collection.JavaConversions._
 
 /**
@@ -82,7 +84,7 @@ abstract class LogicalWindowAggregateRuleBase(description: String)
 
     val newProject = builder
       .push(project.getInput)
-      .project(project.getChildExps.updated(windowExprIdx, inAggGroupExpression))
+      .project(project.getProjects.updated(windowExprIdx, inAggGroupExpression))
       .build()
 
     // translate window against newProject.
@@ -174,7 +176,7 @@ abstract class LogicalWindowAggregateRuleBase(description: String)
       relBuilder: RelBuilder): LogicalProject = {
     val projectInput = trimHep(project.getInput)
     var hasWindowOnProctimeCall: Boolean = false
-    val newProjectExprs = project.getChildExps.map {
+    val newProjectExprs = project.getProjects.map {
       case call: RexCall if isWindowCall(call) && isProctimeCall(call.getOperands.head) =>
         hasWindowOnProctimeCall = true
         // Update the window call to reference a RexInputRef instead of a PROCTIME() call.
@@ -204,7 +206,8 @@ abstract class LogicalWindowAggregateRuleBase(description: String)
       // we have to use project factory, because RelBuilder will simplify redundant projects
       RelFactories
         .DEFAULT_PROJECT_FACTORY
-        .createProject(newInput, newProjectExprs, project.getRowType.getFieldNames)
+        .createProject(newInput, Collections.emptyList(),
+          newProjectExprs, project.getRowType.getFieldNames)
         .asInstanceOf[LogicalProject]
     } else {
       project

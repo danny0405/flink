@@ -22,6 +22,7 @@ import org.apache.flink.table.api.TableException
 import org.apache.flink.table.connector.ChangelogMode
 import org.apache.flink.table.planner.plan.`trait`.UpdateKindTrait.{BEFORE_AND_AFTER, ONLY_UPDATE_AFTER, beforeAfterOrNone, onlyAfterOrNone}
 import org.apache.flink.table.planner.plan.`trait`._
+import org.apache.flink.table.planner.plan.nodes.common.CommonPhysicalJoin
 import org.apache.flink.table.planner.plan.nodes.physical.stream._
 import org.apache.flink.table.planner.plan.utils._
 import org.apache.flink.table.planner.sinks.DataStreamTableSink
@@ -284,6 +285,12 @@ class FlinkChangelogModeInferenceProgram extends FlinkOptimizeProgram[StreamOpti
         val providedTrait = new ModifyKindSetTrait(scan.intermediateTable.modifyKindSet)
         createNewNode(scan, List(), providedTrait, requiredTrait, requester)
 
+      case windowJoin: StreamExecWindowJoin =>
+        val children = visitChildren(rel, requiredTrait, requester)
+        // window-join only outputs insert-only messages
+        createNewNode(windowJoin, children, ModifyKindSetTrait.INSERT_ONLY,
+          requiredTrait, requester)
+
       case _ =>
         throw new UnsupportedOperationException(
           s"Unsupported visit for ${rel.getClass.getSimpleName}")
@@ -468,12 +475,13 @@ class FlinkChangelogModeInferenceProgram extends FlinkOptimizeProgram[StreamOpti
         val children = visitChildren(sort, requiredChildTrait)
         createNewNode(sort, children, requiredTrait)
 
-      case join: StreamExecJoin =>
+      case _: StreamExecJoin | _: StreamExecWindowJoin =>
         val requiredUpdateBeforeByParent = requiredTrait.updateKind == UpdateKind.BEFORE_AND_AFTER
-        val children = join.getInputs.zipWithIndex.map {
+        val children = rel.getInputs.zipWithIndex.map {
           case (child, childOrdinal) =>
             val physicalChild = child.asInstanceOf[StreamPhysicalRel]
-            val needUpdateBefore = !join.inputUniqueKeyContainsJoinKey(childOrdinal)
+            val needUpdateBefore = !rel.asInstanceOf[CommonPhysicalJoin]
+                .inputUniqueKeyContainsJoinKey(childOrdinal)
             val inputModifyKindSet = getModifyKindSet(physicalChild)
             val childRequiredTrait = if (needUpdateBefore || requiredUpdateBeforeByParent) {
               beforeAfterOrNone(inputModifyKindSet)
@@ -485,7 +493,7 @@ class FlinkChangelogModeInferenceProgram extends FlinkOptimizeProgram[StreamOpti
         if (children.exists(_.isEmpty)) {
           None
         } else {
-          createNewNode(join, Some(children.flatten.toList), requiredTrait)
+          createNewNode(rel, Some(children.flatten.toList), requiredTrait)
         }
 
       case temporalJoin: StreamExecTemporalJoin =>

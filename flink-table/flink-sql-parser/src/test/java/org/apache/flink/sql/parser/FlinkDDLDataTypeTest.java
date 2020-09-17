@@ -230,7 +230,7 @@ public class FlinkDDLDataTypeTest {
 			createTestItem("TIMESTAMP(3) WITH ^TIME^ ZONE",
 				"(?s).*Encountered \"TIME\" at .*"),
 			createTestItem("^NULL^",
-				"(?s).*Encountered \"NULL\" at line 2, column 6..*"),
+				"(?s).*Incorrect syntax near the keyword 'NULL' at line 2, column 6..*"),
 			createTestItem("cat.db.MyType", null, "`cat`.`db`.`MyType`"),
 			createTestItem("`db`.`MyType`", null, "`db`.`MyType`"),
 			createTestItem("MyType", null, "`MyType`"),
@@ -238,7 +238,7 @@ public class FlinkDDLDataTypeTest {
 			createTestItem("ROW<f0 MyType, f1 `c`.`d`.`t`>", null,
 				"ROW< `f0` `MyType`, `f1` `c`.`d`.`t` >"),
 			createTestItem("^INTERVAL^ YEAR",
-				"(?s).*Encountered \"INTERVAL\" at line 2, column 6..*"),
+				"(?s).*Incorrect syntax near the keyword 'INTERVAL' at line 2, column 6..*"),
 			createTestItem("RAW(^)^",
 				"(?s).*Encountered \"\\)\" at line 2, column 10.\n.*"
 					+ "Was expecting one of:\n"
@@ -523,8 +523,9 @@ public class FlinkDDLDataTypeTest {
 			return validatorFactory.create(operatorTable,
 				catalogReader,
 				typeFactory,
-				conformance)
-				.setEnableTypeCoercion(enableTypeCoercion);
+				SqlValidator.Config.DEFAULT
+					.withSqlConformance(conformance)
+					.withTypeCoercionEnabled(enableTypeCoercion));
 		}
 
 		private static SqlOperatorTable createOperatorTable(SqlOperatorTable opTab0) {

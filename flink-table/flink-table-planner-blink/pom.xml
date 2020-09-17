@@ -190,10 +190,6 @@ under the License.
 					<artifactId>commons-dbcp2</artifactId>
 				</exclusion>
 				<exclusion>
-					<groupId>com.esri.geometry</groupId>
-					<artifactId>esri-geometry-api</artifactId>
-				</exclusion>
-				<exclusion>
 					<groupId>com.fasterxml.jackson.dataformat</groupId>
 					<artifactId>jackson-dataformat-yaml</artifactId>
 				</exclusion>

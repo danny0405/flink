@@ -50,8 +50,9 @@ public final class FlinkCalciteSqlValidator extends SqlValidatorImpl {
 	public FlinkCalciteSqlValidator(
 			SqlOperatorTable opTab,
 			SqlValidatorCatalogReader catalogReader,
-			RelDataTypeFactory typeFactory) {
-		super(opTab, catalogReader, typeFactory, SqlConformanceEnum.DEFAULT);
+			RelDataTypeFactory typeFactory,
+			SqlValidator.Config config) {
+		super(opTab, catalogReader, typeFactory, config);
 	}
 
 	@Override

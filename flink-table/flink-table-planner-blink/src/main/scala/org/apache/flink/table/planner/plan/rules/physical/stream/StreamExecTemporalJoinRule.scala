@@ -22,6 +22,7 @@ import org.apache.flink.table.planner.plan.`trait`.FlinkRelDistribution
 import org.apache.flink.table.planner.plan.nodes.FlinkConventions
 import org.apache.flink.table.planner.plan.nodes.logical._
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamExecTemporalJoin
+import org.apache.flink.table.planner.plan.utils.JoinUtil.toHashTraitByColumns
 import org.apache.flink.table.planner.plan.utils.TemporalJoinUtil.containsTemporalJoinCondition
 import org.apache.flink.table.planner.plan.utils.{FlinkRelOptUtil, IntervalJoinUtil}
 
@@ -67,23 +68,12 @@ class StreamExecTemporalJoinRule
     val traitSet: RelTraitSet = join.getTraitSet.replace(FlinkConventions.STREAM_PHYSICAL)
     val joinInfo = join.analyzeCondition
 
-    def toHashTraitByColumns(columns: util.Collection[_ <: Number], inputTraitSets: RelTraitSet) = {
-      val distribution = if (columns.size() == 0) {
-        FlinkRelDistribution.SINGLETON
-      } else {
-        FlinkRelDistribution.hash(columns)
-      }
-      inputTraitSets.
-        replace(FlinkConventions.STREAM_PHYSICAL).
-        replace(distribution)
-    }
     val (leftRequiredTrait, rightRequiredTrait) = (
       toHashTraitByColumns(joinInfo.leftKeys, left.getTraitSet),
       toHashTraitByColumns(joinInfo.rightKeys, right.getTraitSet))
 
     val convLeft: RelNode = RelOptRule.convert(left, leftRequiredTrait)
     val convRight: RelNode = RelOptRule.convert(right, rightRequiredTrait)
-
 
     val temporalJoin = new StreamExecTemporalJoin(
       join.getCluster,

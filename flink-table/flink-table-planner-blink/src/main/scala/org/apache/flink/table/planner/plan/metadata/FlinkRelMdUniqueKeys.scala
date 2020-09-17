@@ -39,11 +39,11 @@ import org.apache.calcite.rel.core._
 import org.apache.calcite.rel.metadata._
 import org.apache.calcite.rel.{RelNode, SingleRel}
 import org.apache.calcite.rex.{RexCall, RexInputRef, RexNode}
-import org.apache.calcite.sql.SqlKind
+import org.apache.calcite.sql.{SqlKind, SqlWindowTableFunction}
 import org.apache.calcite.sql.fun.SqlStdOperatorTable
 import org.apache.calcite.util.{Bug, BuiltInMethod, ImmutableBitSet, Util}
-
 import com.google.common.collect.ImmutableSet
+import org.apache.calcite.rel.logical.LogicalTableFunctionScan
 
 import java.util
 
@@ -536,6 +536,18 @@ class FlinkRelMdUniqueKeys private extends MetadataHandler[BuiltInMetadata.Uniqu
       ImmutableSet.of(ImmutableBitSet.range(rel.getRowType.getFieldCount))
     } else {
       ImmutableSet.of()
+    }
+  }
+
+  def getUniqueKeys(
+      rel: LogicalTableFunctionScan,
+      mq: RelMetadataQuery,
+      ignoreNulls: Boolean): JSet[ImmutableBitSet] = {
+    if (rel.getInputs.size() == 1
+        && rel.getCall.asInstanceOf[RexCall].getOperator.isInstanceOf[SqlWindowTableFunction]) {
+      getUniqueKeys(rel.getInput(0), mq, ignoreNulls)
+    } else {
+      null
     }
   }
 

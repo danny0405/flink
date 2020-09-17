@@ -20,10 +20,12 @@ package org.apache.flink.table.planner.plan.utils
 
 import org.apache.flink.table.api.{TableConfig, TableException}
 import org.apache.flink.table.planner.codegen.{CodeGeneratorContext, ExprCodeGenerator, FunctionCodeGenerator}
+import org.apache.flink.table.planner.plan.`trait`.FlinkRelDistribution
+import org.apache.flink.table.planner.plan.nodes.FlinkConventions
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition
 import org.apache.flink.table.types.logical.LogicalType
 
-import org.apache.calcite.plan.RelOptUtil
+import org.apache.calcite.plan.{RelOptUtil, RelTraitSet}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rel.core.{Join, JoinInfo}
 import org.apache.calcite.rex.{RexBuilder, RexNode}
@@ -137,5 +139,18 @@ object JoinUtil {
       ctx,
       "ConditionFunction",
       body)
+  }
+
+  def toHashTraitByColumns(
+    columns: util.Collection[_ <: Number],
+    inputTraitSets: RelTraitSet): RelTraitSet = {
+    val distribution = if (columns.isEmpty) {
+      FlinkRelDistribution.SINGLETON
+    } else {
+      FlinkRelDistribution.hash(columns)
+    }
+    inputTraitSets
+      .replace(FlinkConventions.STREAM_PHYSICAL)
+      .replace(distribution)
   }
 }

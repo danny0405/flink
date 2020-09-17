@@ -21,7 +21,10 @@ package org.apache.flink.table.planner.plan.rules.logical
 import org.apache.calcite.adapter.enumerable.EnumerableTableScan
 import org.apache.calcite.plan.RelOptRule.{any, operand}
 import org.apache.calcite.plan.{RelOptRule, RelOptRuleCall, RelOptRuleOperand}
+import org.apache.calcite.rel.hint.RelHint
 import org.apache.calcite.rel.logical.LogicalTableScan
+
+import java.util.Collections
 
 /**
   * Rule that converts an EnumerableTableScan into a LogicalTableScan.
@@ -37,7 +40,7 @@ class EnumerableToLogicalTableScan(
   override def onMatch(call: RelOptRuleCall): Unit = {
     val oldRel = call.rel(0).asInstanceOf[EnumerableTableScan]
     val table = oldRel.getTable
-    val newRel = LogicalTableScan.create(oldRel.getCluster, table)
+    val newRel = LogicalTableScan.create(oldRel.getCluster, table, oldRel.getHints)
     call.transformTo(newRel)
   }
 }

@@ -61,7 +61,7 @@ import org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.SqlOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
-import org.apache.calcite.sql.util.ChainedSqlOperatorTable;
+import org.apache.calcite.sql.util.SqlOperatorTables;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.tools.FrameworkConfig;
@@ -289,7 +289,7 @@ public class PlannerContext {
 					if (calciteConfig.replacesSqlOperatorTable()) {
 						return operatorTable;
 					} else {
-						return ChainedSqlOperatorTable.of(getBuiltinSqlOperatorTable(), operatorTable);
+						return SqlOperatorTables.chain(getBuiltinSqlOperatorTable(), operatorTable);
 					}
 				}
 		).orElseGet(this::getBuiltinSqlOperatorTable);
@@ -299,7 +299,7 @@ public class PlannerContext {
 	 * Returns builtin the operator table and external the operator for this environment.
 	 */
 	private SqlOperatorTable getBuiltinSqlOperatorTable() {
-		return ChainedSqlOperatorTable.of(
+		return SqlOperatorTables.chain(
 				new FunctionCatalogOperatorTable(
 						context.getFunctionCatalog(),
 						context.getCatalogManager().getDataTypeFactory(),
