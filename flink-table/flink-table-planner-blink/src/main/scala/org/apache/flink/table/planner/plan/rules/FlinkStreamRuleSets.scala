@@ -114,6 +114,7 @@ object FlinkStreamRuleSets {
         // make sure window aggregate can be correctly rewritten by StreamLogicalWindowAggregateRule
         CoreRules.PROJECT_MERGE,
         StreamLogicalWindowAggregateRule.INSTANCE,
+//        WindowJoinRewriteRule.INSTANCE,
         // slices a project into sections which contain window agg functions
         // and sections which do not.
         CoreRules.PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW,
@@ -147,7 +148,8 @@ object FlinkStreamRuleSets {
     CoreRules.FILTER_PROJECT_TRANSPOSE,
     // push a filter past a setop
     CoreRules.FILTER_SET_OP_TRANSPOSE,
-    CoreRules.FILTER_MERGE
+    CoreRules.FILTER_MERGE,
+    FilterWindowFunctionScanTransposeRule.INSTANCE
   )
 
   /**
@@ -206,7 +208,8 @@ object FlinkStreamRuleSets {
     //removes constant keys from an Agg
     CoreRules.AGGREGATE_PROJECT_PULL_UP_CONSTANTS,
     // push project through a Union
-    CoreRules.PROJECT_SET_OP_TRANSPOSE
+    CoreRules.PROJECT_SET_OP_TRANSPOSE,
+    ProjectWindowFunctionScanTransposeRule.INSTANCE
   )
 
   val JOIN_REORDER_PREPARE_RULES: RuleSet = RuleSets.ofList(

@@ -71,8 +71,10 @@ class StreamExecJoin(
   override def explainTerms(pw: RelWriter): RelWriter = {
     super
       .explainTerms(pw)
-      .item("leftInputSpec", analyzeJoinInput(left))
-      .item("rightInputSpec", analyzeJoinInput(right))
+      .item("leftInputSpec",
+        JoinUtil.analyzeJoinInput(getCluster, left, keyPairs, isLeft = true))
+      .item("rightInputSpec",
+        JoinUtil.analyzeJoinInput(getCluster, right, keyPairs, isLeft = false))
   }
 
   override def computeSelfCost(planner: RelOptPlanner, metadata: RelMetadataQuery): RelOptCost = {
@@ -112,8 +114,8 @@ class StreamExecJoin(
     val leftSelect = KeySelectorUtil.getRowDataSelector(leftJoinKey, leftType)
     val rightSelect = KeySelectorUtil.getRowDataSelector(rightJoinKey, rightType)
 
-    val leftInputSpec = analyzeJoinInput(left)
-    val rightInputSpec = analyzeJoinInput(right)
+    val leftInputSpec = JoinUtil.analyzeJoinInput(getCluster, left, keyPairs, isLeft = true)
+    val rightInputSpec = JoinUtil.analyzeJoinInput(getCluster, right, keyPairs, isLeft = false)
 
     val generatedCondition = JoinUtil.generateConditionFunction(
       tableConfig,

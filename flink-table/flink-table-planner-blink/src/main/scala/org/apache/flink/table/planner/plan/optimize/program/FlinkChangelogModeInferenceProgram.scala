@@ -20,7 +20,7 @@ package org.apache.flink.table.planner.plan.optimize.program
 
 import org.apache.flink.table.api.TableException
 import org.apache.flink.table.connector.ChangelogMode
-import org.apache.flink.table.planner.plan.`trait`.UpdateKindTrait.{BEFORE_AND_AFTER, ONLY_UPDATE_AFTER, beforeAfterOrNone, onlyAfterOrNone}
+import org.apache.flink.table.planner.plan.`trait`.UpdateKindTrait.{BEFORE_AND_AFTER, NONE, ONLY_UPDATE_AFTER, beforeAfterOrNone, onlyAfterOrNone}
 import org.apache.flink.table.planner.plan.`trait`._
 import org.apache.flink.table.planner.plan.nodes.common.CommonPhysicalJoin
 import org.apache.flink.table.planner.plan.nodes.physical.stream._
@@ -480,8 +480,12 @@ class FlinkChangelogModeInferenceProgram extends FlinkOptimizeProgram[StreamOpti
         val children = rel.getInputs.zipWithIndex.map {
           case (child, childOrdinal) =>
             val physicalChild = child.asInstanceOf[StreamPhysicalRel]
-            val needUpdateBefore = !rel.asInstanceOf[CommonPhysicalJoin]
-                .inputUniqueKeyContainsJoinKey(childOrdinal)
+            val needUpdateBefore = !JoinUtil
+                .inputUniqueKeyContainsJoinKey(
+                  rel.getCluster,
+                  child,
+                  rel.asInstanceOf[CommonPhysicalJoin].keyPairs,
+                  childOrdinal == 0)
             val inputModifyKindSet = getModifyKindSet(physicalChild)
             val childRequiredTrait = if (needUpdateBefore || requiredUpdateBeforeByParent) {
               beforeAfterOrNone(inputModifyKindSet)

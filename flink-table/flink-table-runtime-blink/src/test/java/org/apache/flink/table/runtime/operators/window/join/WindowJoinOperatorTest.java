@@ -1147,9 +1147,9 @@ public class WindowJoinOperatorTest<K, W extends Window> {
 		testHarness.processElement2(insertRecord(2, "key2", 7000L));
 
 		testHarness.setProcessingTime(5000);
-		expectedOutput.add(insertRecord(1, "key1", Long.MAX_VALUE, 1, "key2", Long.MAX_VALUE,
-				TimestampData.fromEpochMillis(0), TimestampData.fromEpochMillis(3000)));
 		expectedOutput.add(insertRecord(1, "key1", 7000L, 1, "key2", Long.MAX_VALUE,
+				TimestampData.fromEpochMillis(0), TimestampData.fromEpochMillis(3000)));
+		expectedOutput.add(insertRecord(1, "key1", Long.MAX_VALUE, 1, "key2", Long.MAX_VALUE,
 				TimestampData.fromEpochMillis(0), TimestampData.fromEpochMillis(3000)));
 		assertor.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput());
 

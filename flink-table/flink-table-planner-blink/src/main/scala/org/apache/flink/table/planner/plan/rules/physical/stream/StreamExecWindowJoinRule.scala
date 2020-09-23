@@ -19,216 +19,143 @@
 package org.apache.flink.table.planner.plan.rules.physical.stream
 
 import org.apache.flink.table.api.ValidationException
-import org.apache.flink.table.planner.JList
-import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.FlinkConventions
-import org.apache.flink.table.planner.plan.nodes.logical.{FlinkLogicalCalc, FlinkLogicalJoin, FlinkLogicalTableFunctionScan}
+import org.apache.flink.table.planner.plan.nodes.logical.{FlinkLogicalCalc, FlinkLogicalJoin, FlinkLogicalRel, FlinkLogicalTableFunctionScan}
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamExecWindowJoin
 import org.apache.flink.table.planner.plan.utils.JoinUtil.toHashTraitByColumns
+import org.apache.flink.table.planner.utils.WindowJoinUtils
+import org.apache.flink.table.runtime.operators.window.join.WindowAttribute
 
 import org.apache.calcite.plan.RelOptRule.{any, operand}
 import org.apache.calcite.plan.{RelOptRule, RelOptRuleCall}
 import org.apache.calcite.rel.RelNode
-import org.apache.calcite.rel.`type`.{RelDataType, RelDataTypeField}
-import org.apache.calcite.rex.{RexBuilder, RexCall, RexInputRef, RexLocalRef, RexNode, RexProgram, RexProgramBuilder, RexShuttle, RexUtil}
-import org.apache.calcite.sql.SqlWindowTableFunction
-import org.apache.calcite.sql.validate.SqlValidatorUtil
+import org.apache.calcite.rel.core.TableFunctionScan
+import org.apache.calcite.rex.{RexCall, RexNode, RexProgramBuilder}
 import org.apache.calcite.tools.RelBuilder
-import org.apache.calcite.util.Util
-
-import java.util.Collections
-
-import scala.collection.JavaConversions._
 
 /**
-  * Rule that converts [[FlinkLogicalJoin]] with window bounds in join condition
+  * Rule that converts [[FlinkLogicalWindowJoin]] with window bounds in join condition
   * to [[StreamExecWindowJoin]].
   */
 class StreamExecWindowJoinRule
   extends RelOptRule(
     operand(classOf[FlinkLogicalJoin],
-      operand(classOf[FlinkLogicalCalc],
-        operand(classOf[FlinkLogicalTableFunctionScan], any())),
-      operand(classOf[FlinkLogicalCalc],
-        operand(classOf[FlinkLogicalTableFunctionScan], any()))),
-    "StreamExecWindowJoinRule") {
+      operand(classOf[FlinkLogicalRel], any()),
+      operand(classOf[FlinkLogicalRel], any())),
+    "StreamExecWindowJoinRule2") {
 
   override def matches(call: RelOptRuleCall): Boolean = {
     val join: FlinkLogicalJoin = call.rel(0)
+    val left: FlinkLogicalRel = call.rel(1)
+    val right: FlinkLogicalRel = call.rel(2)
+    val leftMatch = isMatchedInput(left)
+    if (!leftMatch) {
+      return false
+    }
+    val rightMatch = isMatchedInput(right)
+    if (!rightMatch) {
+      return false
+    }
     if (!join.getJoinType.projectsRight()) {
       throw new ValidationException("Window function does not support SEMI or ANTI-SEMI join yet")
     }
-    val left: FlinkLogicalTableFunctionScan = call.rel(2)
-      .asInstanceOf[FlinkLogicalTableFunctionScan]
-    val scanCall1: RexCall = left.getCall.asInstanceOf[RexCall]
-    val right: FlinkLogicalTableFunctionScan = call.rel(4)
-      .asInstanceOf[FlinkLogicalTableFunctionScan]
-    val scanCall2: RexCall = right.getCall.asInstanceOf[RexCall]
-
-    if (!isWindowFunctionCall(scanCall1) || !isWindowFunctionCall(scanCall2)) {
-      return false
-    }
-
-    if (!FlinkTypeFactory.isTimeIndicatorType(descriptorArgumentType(scanCall1)) ||
-      !FlinkTypeFactory.isTimeIndicatorType(descriptorArgumentType(scanCall2))) {
-      throw new ValidationException("The timeCol of the window function must be time attribute," +
-        "e.g. you should define a watermark strategy based on the column")
-    }
-
-    if (!isSameWindowAttributes(scanCall1, scanCall2)) {
-      throw new ValidationException("Only stream window of same attributes can be joined together")
-    }
-
     true
   }
 
-  def descriptorArgumentType(node: RexCall): RelDataType = {
-    node.getOperands.get(0).asInstanceOf[RexCall].getOperands.get(0).getType
-  }
-
-  def isWindowFunctionCall(node: RexCall): Boolean = {
-    node.getOperator.isInstanceOf[SqlWindowTableFunction]
-  }
-
-  def isSameWindowAttributes(call1: RexCall, call2: RexCall): Boolean = {
-    if (call1.getKind != call2.getKind) {
-      return false
-    }
-    val operands1: JList[RexNode] = call1.getOperands
-    val operands2: JList[RexNode] = call2.getOperands
-    if (operands1.size() != operands2.size()) {
-      return false
-    }
-    // All the operands are the same except for the timeCol.
-    // The timeCol is always the first operand.
-    Util.skip(operands1) zip Util.skip(operands2) foreach {
-      case (opd1: RexNode, opd2: RexNode) =>
-        if (!opd1.equals(opd2)) {
-          return false
+  /** Decides whether the input rel is what desire to match. */
+  private def isMatchedInput(rel: FlinkLogicalRel): Boolean = {
+    rel match {
+      case scan: FlinkLogicalTableFunctionScan =>
+        WindowJoinUtils.isWindowFunctionCall(scan.getCall)
+      case calc: FlinkLogicalCalc =>
+        val scan = WindowJoinUtils.trimPlannerNodes(calc.getInput(0))
+        scan match {
+          case funcScan: TableFunctionScan =>
+            WindowJoinUtils.isWindowFunctionCall(funcScan.getCall)
+          case _ => false
         }
+      case _ => false
     }
-    true
+  }
+
+  def resolveNewInput(
+      relBuilder: RelBuilder,
+      oriInput: FlinkLogicalRel)
+  : (RelNode, RexNode, WindowAttribute) = oriInput match {
+    case scan: FlinkLogicalTableFunctionScan =>
+      (scan.getInput(0), scan.getCall, WindowAttribute.START_END)
+    case calc: FlinkLogicalCalc =>
+      val program = calc.getProgram
+      val tableFunctionScan = WindowJoinUtils.trimPlannerNodes(calc.getInput)
+          .asInstanceOf[TableFunctionScan]
+      val scanFieldsCnt = tableFunctionScan.getRowType.getFieldCount
+      val scanInput = tableFunctionScan.getInput(0)
+      val windowStartRef = scanFieldsCnt - 2
+      val windowEndRef = scanFieldsCnt - 1
+      val windowAttr = WindowJoinUtils.validateAndGetWindowAttr(
+        program, windowStartRef, windowEndRef)
+      val condition = if (program.getCondition == null) {
+        null
+      } else {
+        program.expandLocalRef(program.getCondition)
+      }
+      WindowJoinUtils.validateCondition(condition, windowStartRef, windowEndRef)
+      val newProgram = RexProgramBuilder.create(
+        relBuilder.getRexBuilder,
+        scanInput.getRowType,
+        WindowJoinUtils.getPushedExprs(program, windowStartRef, windowEndRef),
+        WindowJoinUtils.getPushedProjects(program, windowAttr),
+        condition,
+        WindowJoinUtils.getPushedRowType(
+          relBuilder.getTypeFactory,
+          calc.getRowType,
+          windowAttr),
+        false,
+        null)
+          .getProgram
+      val newNode = FlinkLogicalCalc.create(scanInput, newProgram)
+      (newNode, tableFunctionScan.getCall, windowAttr)
+    case _ => (null, null, null)
   }
 
   override def onMatch(call: RelOptRuleCall): Unit = {
-    val relBuilder: RelBuilder = call.builder()
-    val rexBuilder: RexBuilder = relBuilder.getRexBuilder
     val join: FlinkLogicalJoin = call.rel(0)
-    val leftCalc: FlinkLogicalCalc = call.rel(1)
-    val leftFuncScan: FlinkLogicalTableFunctionScan = call.rel(2)
-    val leftInput = leftFuncScan.getInput(0)
-    val rightCalc: FlinkLogicalCalc = call.rel(3)
-    val rightFuncScan: FlinkLogicalTableFunctionScan = call.rel(4)
-    val rightInput = rightFuncScan.getInput(0)
+    val left: FlinkLogicalRel = call.rel(1)
+    val right: FlinkLogicalRel = call.rel(2)
 
-    // -------------------------------------------------------------------------
-    //  1. Push the calc filters into the join input
-    // -------------------------------------------------------------------------
-
-    val joinInfo = join.analyzeCondition()
+    val joinInfo = join.analyzeCondition
     val (leftRequiredTrait, rightRequiredTrait) = (
-      toHashTraitByColumns(joinInfo.leftKeys, leftInput.getTraitSet),
-      toHashTraitByColumns(joinInfo.rightKeys, rightInput.getTraitSet))
+      toHashTraitByColumns(joinInfo.leftKeys, left.getTraitSet),
+      toHashTraitByColumns(joinInfo.rightKeys, right.getTraitSet))
 
     val providedTraitSet = join.getTraitSet.replace(FlinkConventions.STREAM_PHYSICAL)
+    // resolve left window function
+    val (newLeft0, leftCall, leftAttr) = resolveNewInput(call.builder(), left)
+    if (leftAttr == null) {
+      return
+    }
+    // resolve right window function
+    val (newRight0, rightCall, rightAttr) = resolveNewInput(call.builder(), right)
+    if (rightAttr == null) {
+      return
+    }
 
-    val leftProgram = leftCalc.getProgram
-    val rightProgram = rightCalc.getProgram
-    val newLeftInput0: RelNode = if (leftProgram.getCondition != null) {
-      relBuilder.push(leftInput)
-          .filter(leftProgram.expandLocalRef(leftProgram.getCondition))
-          .build()
-    } else {
-      leftInput
-    }
-    val newLeftInput: RelNode = RelOptRule.convert(newLeftInput0, leftRequiredTrait)
-    val newRightInput0: RelNode = if (rightProgram.getCondition != null) {
-      relBuilder.push(rightInput)
-          .filter(rightProgram.expandLocalRef(rightProgram.getCondition))
-          .build()
-    } else {
-      rightInput
-    }
-    val newRightInput: RelNode = RelOptRule.convert(newRightInput0, rightRequiredTrait)
+    val newLeft: RelNode = RelOptRule.convert(newLeft0, leftRequiredTrait)
+    val newRight: RelNode = RelOptRule.convert(newRight0, rightRequiredTrait)
 
     val newJoin = new StreamExecWindowJoin(
       join.getCluster,
       providedTraitSet,
-      newLeftInput,
-      newRightInput,
-      leftFuncScan.getCall.asInstanceOf[RexCall],
-      rightFuncScan.getCall.asInstanceOf[RexCall],
-      shiftJoinCondition(join.getCondition, leftProgram, rightProgram,
-        leftFuncScan.getRowType.getFieldCount),
+      newLeft,
+      newRight,
+      leftAttr,
+      rightAttr,
+      leftCall.asInstanceOf[RexCall],
+      rightCall.asInstanceOf[RexCall],
+      join.getCondition,
       join.getJoinType)
 
-    val newExprs = new java.util.ArrayList[RexNode](leftProgram.getExprList)
-    val leftExprCnt = newExprs.size()
-    val newProjectRefs = new java.util.ArrayList[RexLocalRef](leftProgram.getProjectList)
-    val rightExprList = rightProgram.getExprList
-    newExprs.addAll(RexUtil.shift(rightExprList, leftFuncScan.getRowType.getFieldCount))
-    newProjectRefs.addAll(
-      rightProgram.getProjectList
-          .map(ref => new RexLocalRef(ref.getIndex + leftExprCnt, ref.getType)))
-
-    // -------------------------------------------------------------------------
-    //  2. Construct the final program
-    // -------------------------------------------------------------------------
-    val newProgram = RexProgramBuilder.create(
-      rexBuilder,
-      // Table function san row type has window attributes
-      SqlValidatorUtil.createJoinType(
-        relBuilder.getTypeFactory,
-        leftFuncScan.getRowType,
-        rightFuncScan.getRowType,
-        null,
-        Collections.emptyList[RelDataTypeField]),
-      newExprs,
-      newProjectRefs,
-      null,
-      // join type
-      SqlValidatorUtil.createJoinType(
-        relBuilder.getTypeFactory,
-        leftCalc.getRowType,
-        rightCalc.getRowType,
-        null,
-        Collections.emptyList[RelDataTypeField]),
-      false,
-      null
-    ).getProgram
-
-    val newLogicalNode = FlinkLogicalCalc.create(newJoin, newProgram)
-    val newNode = RelOptRule.convert(newLogicalNode,
-      newLogicalNode.getTraitSet.replace(FlinkConventions.STREAM_PHYSICAL))
-    call.transformTo(newNode)
-  }
-
-  private def shiftJoinCondition(
-      condition: RexNode,
-      leftProgram: RexProgram,
-      rightProgram: RexProgram,
-      leftFields: Int): RexNode = {
-    val leftProjects = leftProgram.getProjectList
-    val rightProjects = rightProgram.getProjectList
-    val leftCnt = leftProjects.length
-
-    condition.accept(new RexShuttle() {
-      override def visitInputRef(input: RexInputRef): RexNode = {
-        val index = input.getIndex
-        val program = if (index < leftCnt) { leftProgram } else { rightProgram }
-        val projects = if (index < leftCnt) { leftProjects } else { rightProjects }
-        // Shift the LHS Calc fields cnt.
-        val shift0 = if (index < leftCnt) { 0 } else { -leftCnt }
-        val item = program.expandLocalRef(projects.get(index + shift0))
-        if (!item.isInstanceOf[RexInputRef]) {
-          throw new ValidationException("Window join condition referencing " +
-              "underlying calls is not supported yet")
-        }
-        // Shift the join LHS field cnt.
-        val shift = if (index < leftCnt) { 0 } else { leftFields }
-        new RexInputRef(item.asInstanceOf[RexInputRef].getIndex + shift, input.getType)
-      }
-    })
+    call.transformTo(newJoin)
   }
 }
 

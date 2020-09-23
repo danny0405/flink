@@ -38,7 +38,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.JoinedRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition;
 import org.apache.flink.table.runtime.operators.join.FlinkJoinType;
 import org.apache.flink.table.runtime.operators.join.stream.AbstractStreamingJoinOperator;
@@ -166,6 +165,10 @@ public class WindowJoinOperator<K, W extends Window>
 
 	private final int rightRowtimeIndex;
 
+	private final WindowAttribute leftWindowAttr;
+
+	private final WindowAttribute rightWindowAttr;
+
 	// -------------------------------------------------------------------------
 	//  Join Configuration
 	// -------------------------------------------------------------------------
@@ -175,14 +178,14 @@ public class WindowJoinOperator<K, W extends Window>
 	// whether right hand side can generate nulls
 	private final boolean generateNullsOnRight;
 
-	// data row: left input + right input
-	private transient JoinedRowData dataRow;
+	// used to output left data row and window attributes
+	private transient WindowAttrCollectors.WindowAttrCollector leftCollector;
+	// used to output right data row and window attributes
+	private transient WindowAttrCollectors.WindowAttrCollector rightCollector;
 	private transient RowData leftNullRow;
 	private transient RowData rightNullRow;
-	// window attributes: window_start, window_end
-	private transient GenericRowData windowAttributes;
 	// output row: data row + window attributes
-	private transient JoinedRowData outRow;
+	private transient JoinedRowData outputRow;
 
 	// left join state
 	private transient WindowJoinRecordStateView<W> joinInputView1;
@@ -211,6 +214,8 @@ public class WindowJoinOperator<K, W extends Window>
 			boolean generateNullsOnRight,
 			int leftRowtimeIndex,
 			int rightRowtimeIndex,
+			WindowAttribute leftWindowAttr,
+			WindowAttribute rightWindowAttr,
 			boolean[] filterNullKeys) {
 		super(leftType, rightType, generatedJoinCondition, leftInputSideSpec,
 				rightInputSideSpec, filterNullKeys, -1);
@@ -225,6 +230,8 @@ public class WindowJoinOperator<K, W extends Window>
 				|| leftRowtimeIndex >= 0 && rightRowtimeIndex >= 0);
 		this.leftRowtimeIndex = leftRowtimeIndex;
 		this.rightRowtimeIndex = rightRowtimeIndex;
+		this.leftWindowAttr = leftWindowAttr;
+		this.rightWindowAttr = rightWindowAttr;
 	}
 
 	@Override
@@ -237,11 +244,11 @@ public class WindowJoinOperator<K, W extends Window>
 		triggerContext = new TriggerContext();
 		triggerContext.open();
 
-		this.dataRow = new JoinedRowData();
-		this.outRow = new JoinedRowData();
+		this.leftCollector = WindowAttrCollectors.getWindowAttrCollector(leftWindowAttr);
+		this.rightCollector = WindowAttrCollectors.getWindowAttrCollector(rightWindowAttr);
+		this.outputRow = new JoinedRowData();
 		this.leftNullRow = new GenericRowData(leftType.toRowType().getFieldCount());
 		this.rightNullRow = new GenericRowData(rightType.toRowType().getFieldCount());
-		this.windowAttributes = new GenericRowData(2);
 
 		ViewContext viewContext = new ViewContext();
 		// initialize states
@@ -612,6 +619,8 @@ public class WindowJoinOperator<K, W extends Window>
 		private long allowedLateness = 0L;
 		private int rowtimeIndex1 = -1;
 		private int rowtimeIndex2 = -1;
+		private WindowAttribute leftAttr = WindowAttribute.NONE;
+		private WindowAttribute rightAttr = WindowAttribute.START_END;
 		private boolean[] filterNullKeys;
 
 		public Builder inputType(
@@ -722,6 +731,12 @@ public class WindowJoinOperator<K, W extends Window>
 			return this;
 		}
 
+		public Builder windowAttribute(WindowAttribute leftAttr, WindowAttribute rightAttr) {
+			this.leftAttr = Objects.requireNonNull(leftAttr);
+			this.rightAttr = Objects.requireNonNull(rightAttr);
+			return this;
+		}
+
 		@SuppressWarnings("unchecked")
 		public <K, W extends Window> WindowJoinOperator<K, W> build() {
 			Preconditions.checkState(this.type1 != null && this.type2 != null,
@@ -754,6 +769,8 @@ public class WindowJoinOperator<K, W extends Window>
 					this.generateNullsOnRight,
 					this.rowtimeIndex1,
 					this.rowtimeIndex2,
+					this.leftAttr,
+					this.rightAttr,
 					this.filterNullKeys);
 		}
 	}
@@ -874,23 +891,25 @@ public class WindowJoinOperator<K, W extends Window>
 	}
 
 	private void output(RowData inputRow, RowData otherRow, W window) {
-		dataRow.replace(inputRow, otherRow);
-		windowAttributes.setField(0, TimestampData.fromEpochMillis(((TimeWindow) window).getStart()));
-		windowAttributes.setField(1, TimestampData.fromEpochMillis(((TimeWindow) window).getEnd()));
-		outRow.replace(dataRow, windowAttributes);
-		collector.collect(outRow);
+		RowData left = leftCollector.collect(inputRow, (TimeWindow) window);
+		RowData right = rightCollector.collect(otherRow, (TimeWindow) window);
+
+		outputRow.replace(left, right);
+		collector.collect(outputRow);
 	}
 
 	private void outputNullPadding(RowData row, boolean isLeft, W window) {
-		windowAttributes.setField(0, TimestampData.fromEpochMillis(((TimeWindow) window).getStart()));
-		windowAttributes.setField(1, TimestampData.fromEpochMillis(((TimeWindow) window).getEnd()));
+		RowData leftData;
+		RowData rightData;
 		if (isLeft) {
-			dataRow.replace(row, rightNullRow);
+			leftData = leftCollector.collect(row, (TimeWindow) window);
+			rightData = rightCollector.collect(rightNullRow, (TimeWindow) window);
 		} else {
-			dataRow.replace(leftNullRow, row);
+			leftData = leftCollector.collect(leftNullRow, (TimeWindow) window);
+			rightData = rightCollector.collect(row, (TimeWindow) window);
 		}
-		outRow.replace(dataRow, windowAttributes);
-		collector.collect(outRow);
+		outputRow.replace(leftData, rightData);
+		collector.collect(outputRow);
 	}
 
 	// ------------------------------------------------------------------------------

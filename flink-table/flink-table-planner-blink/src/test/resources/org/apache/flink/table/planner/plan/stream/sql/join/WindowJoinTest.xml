@@ -43,14 +43,13 @@ LogicalProject(l0=[$0], r2=[$7])
     <Resource name="planAfter">
       <![CDATA[
 Calc(select=[l0, r2])
-+- Calc(select=[l0, r0, r2])
-   +- WindowJoin(joinType=[InnerJoin], where=[=(l0, lts)], select=[l0, lts, l2, window_start, window_end, r0, rts, r2, window_start0, window_end0], winCall=[TUMBLE(DESCRIPTOR($1), 10000:INTERVAL SECOND)], leftInputSpec=[NoUniqueKey], rightInputSpec=[NoUniqueKey])
-      :- Exchange(distribution=[hash[l0]])
-      :  +- WatermarkAssigner(rowtime=[lts], watermark=[-(lts, 5000:INTERVAL SECOND)])
-      :     +- TableSourceScan(table=[[default_catalog, default_database, L]], fields=[l0, lts, l2])
-      +- Exchange(distribution=[hash[r0]])
-         +- WatermarkAssigner(rowtime=[rts], watermark=[-(rts, 5000:INTERVAL SECOND)])
-            +- TableSourceScan(table=[[default_catalog, default_database, R]], fields=[r0, rts, r2])
++- WindowJoin(joinType=[inner], where=[=(l0, r0)], window=[TUMBLE(TIMECOL => [lts, rts], SIZE => 10000:INTERVAL SECOND)], inputSpec=[[NoUniqueKey, NoUniqueKey]], windowedInput=[false])
+   :- Exchange(distribution=[hash[l0]])
+   :  +- WatermarkAssigner(rowtime=[lts], watermark=[-(lts, 5000:INTERVAL SECOND)])
+   :     +- TableSourceScan(table=[[default_catalog, default_database, L]], fields=[l0, lts, l2])
+   +- Exchange(distribution=[hash[r0]])
+      +- WatermarkAssigner(rowtime=[rts], watermark=[-(rts, 5000:INTERVAL SECOND)])
+         +- TableSourceScan(table=[[default_catalog, default_database, R]], fields=[r0, rts, r2])
 ]]>
     </Resource>
   </TestCase>

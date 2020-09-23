@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.planner.plan.stream.sql.join
 
-import org.apache.flink.api.scala._
-import org.apache.flink.table.api._
 import org.apache.flink.table.planner.utils.{StreamTableTestUtil, TableTestBase}
 
 import org.junit.Test
@@ -27,10 +25,6 @@ import org.junit.Test
 class WindowJoinTest extends TableTestBase {
 
   private val util: StreamTableTestUtil = streamTestUtil()
-  util.addTableSource[(Int, Long, Long)]("A", 'a1, 'a2, 'a3)
-  util.addTableSource[(Int, Long, Long)]("B", 'b1, 'b2, 'b3)
-  util.addTableSource[(Int, Long, String)]("t", 'a, 'b, 'c)
-  util.addTableSource[(Long, String, Int)]("s", 'x, 'y, 'z)
 
   util.addTable(
     s"""create table L(
@@ -54,6 +48,28 @@ class WindowJoinTest extends TableTestBase {
        |)
        |""".stripMargin)
 
+  util.addTable(
+    s"""create table S(
+       |  s0 int primary key not enforced,
+       |  sts timestamp(3),
+       |  s2 varchar(20),
+       |  watermark for sts as sts - INTERVAL '5' SECOND
+       |) with (
+       |  'connector' = 'values'
+       |)
+       |""".stripMargin)
+
+  util.addTable(
+    s"""create table M(
+       |  m0 int primary key not enforced,
+       |  mts timestamp(3),
+       |  m2 varchar(20),
+       |  watermark for mts as mts - INTERVAL '5' SECOND
+       |) with (
+       |  'connector' = 'values'
+       |)
+       |""".stripMargin)
+
   @Test
   def testInnerJoin(): Unit = {
     val query =
@@ -64,254 +80,462 @@ class WindowJoinTest extends TableTestBase {
          |table(tumble(table R, descriptor(rts), interval '10' second)) b
          |on a.l0 = b.r0
          |""".stripMargin
+    val query1 =
+      s"""
+         |select l0, r2 from
+         |(select l0, lts from table(tumble(table L, descriptor(lts), interval '10' second))) a
+         |join
+         |table(tumble(table R, descriptor(rts), interval '10' second)) b
+         |on a.l0 = b.r0
+         |""".stripMargin
+    util.verifyPlan(query1)
+  }
+
+  @Test
+  def testInnerJoinWithProjectInput(): Unit = {
+    val query =
+      s"""
+         |select l0, r2 from
+         |(select l0, lts from table(tumble(table L, descriptor(lts), interval '10' second))) a
+         |join
+         |table(tumble(table R, descriptor(rts), interval '10' second)) b
+         |on a.l0 = b.r0
+         |""".stripMargin
+    util.verifyPlan(query)
+  }
+
+  // TODO:
+  //  1. test different window functions
+  //  2. test join inputs with window attributes
+  //  3. test negative cases
+
+  @Test
+  def testInnerJoinWithPk(): Unit = {
+    val query =
+      s"""
+         |select l0, s2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |join
+         |table(tumble(table S, descriptor(sts), interval '10' second)) b
+         |on a.l0 = b.s0
+         |""".stripMargin
     util.verifyPlan(query)
   }
 
   @Test
-  def testInnerJoinWithEqualPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, b1 FROM ($query1) JOIN ($query2) ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
-  }
-
-  @Test
-  def testInnerJoinWithPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, a2, b1, b2 FROM ($query1) JOIN ($query2) ON a2 = b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
-  }
-
-  @Test
   def testLeftJoinNonEqui(): Unit = {
-    util.verifyPlan(
-      "SELECT a1, b1 FROM A LEFT JOIN B ON a1 = b1 AND a2 > b2", ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select l0, s2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |left join
+         |table(tumble(table S, descriptor(sts), interval '10' second)) b
+         |on a.l0 = b.s0 and a.l2 <> b.s2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftJoinWithEqualPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, b1 FROM ($query1) LEFT JOIN ($query2) ON a1 = b1 AND a2 > b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s0 = b.m0 and a.s2 <> b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftJoinWithRightNotPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query = s"SELECT a1, b1 FROM ($query1) LEFT JOIN B ON a1 = b1 AND a2 > b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select l0, m2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.l0 = b.m0 and a.l2 <> b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftJoinWithPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, a2, b1, b2 FROM ($query1) LEFT JOIN ($query2) ON a2 = b2 AND a1 > b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2 and a.s0 <> b.m0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftJoin(): Unit = {
-    util.verifyPlan("SELECT a1, b1 FROM A LEFT JOIN B ON a1 = b1", ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select l0, r2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |left join
+         |table(tumble(table R, descriptor(rts), interval '10' second)) b
+         |on a.l2 = b.r2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftJoinWithEqualPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, b1 FROM ($query1) LEFT JOIN ($query2) ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s0 = b.m0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftJoinWithRightNotPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query = s"SELECT a1, b1 FROM ($query1) LEFT JOIN B ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, l2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table L, descriptor(lts), interval '10' second)) b
+         |on a.s0 = b.l0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftJoinWithPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, a2, b1, b2 FROM ($query1) LEFT JOIN ($query2) ON a2 = b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoinNonEqui(): Unit = {
-    util.verifyPlan(
-      "SELECT a1, b1 FROM A RIGHT JOIN B ON a1 = b1 AND a2 > b2", ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select l0, r2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |right join
+         |table(tumble(table R, descriptor(rts), interval '10' second)) b
+         |on a.l0 = b.r0 and a.l2 <> b.r2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoinWithEqualPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, b1 FROM ($query1) RIGHT JOIN ($query2) ON a1 = b1 AND a2 > b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s0 = b.m0 and a.s2 <> b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoinWithRightNotPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query = s"SELECT a1, b1 FROM ($query1) RIGHT JOIN B ON a1 = b1 AND a2 > b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, l2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table L, descriptor(lts), interval '10' second)) b
+         |on a.s0 = b.l0 and a.s2 <> b.l2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoinWithPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, a2, b1, b2 FROM ($query1) RIGHT JOIN ($query2) ON a2 = b2 AND a1 > b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2 and a.s0 <> b.m0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoin(): Unit = {
-    util.verifyPlan("SELECT a1, b1 FROM A RIGHT JOIN B ON a1 = b1", ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select l0, r2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |right join
+         |table(tumble(table R, descriptor(rts), interval '10' second)) b
+         |on a.l2 = b.r2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoinWithEqualPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, b1 FROM ($query1) RIGHT JOIN ($query2) ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s0 = b.m0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoinWithRightNotPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A group by a1"
-    val query = s"SELECT a1, b1 FROM ($query1) RIGHT JOIN B ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, l2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table L, descriptor(lts), interval '10' second)) b
+         |on a.s0 = b.l0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightJoinWithPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A group by a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B group by b1"
-    val query = s"SELECT a1, a2, b1, b2 FROM ($query1) RIGHT JOIN ($query2) ON a2 = b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoinNonEqui(): Unit = {
-    util.verifyPlan(
-      "SELECT a1, b1 FROM A FULL JOIN B ON a1 = b1 AND a2 > b2", ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select l0, r2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |full join
+         |table(tumble(table R, descriptor(rts), interval '10' second)) b
+         |on a.l0 = b.r0 and a.l2 <> b.r2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoinWithEqualPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, b1 FROM ($query1) FULL JOIN ($query2) ON a1 = b1 AND a2 > b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s0 = b.m0 and a.s2 <> b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoinWithFullNotPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query = s"SELECT a1, b1 FROM ($query1) FULL JOIN B ON a1 = b1 AND a2 > b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |full join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s0 = b.m0 and a.s2 <> b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoinWithPkNonEqui(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, a2, b1, b2 FROM ($query1) FULL JOIN ($query2) ON a2 = b2 AND a1 > b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |full join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2 and a.s0 <> b.m0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoin(): Unit = {
-    val query = "SELECT a1, b1 FROM A FULL JOIN B ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select l0, r2 from
+         |table(tumble(table L, descriptor(lts), interval '10' second)) a
+         |full join
+         |table(tumble(table R, descriptor(rts), interval '10' second)) b
+         |on a.l2 = b.r2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoinWithEqualPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, b1 FROM ($query1) FULL JOIN ($query2) ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |full join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s0 = b.m0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoinWithFullNotPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query = s"SELECT a1, b1 FROM ($query1) FULL JOIN B ON a1 = b1"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, l2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |full join
+         |table(tumble(table L, descriptor(lts), interval '10' second)) b
+         |on a.s0 = b.l0
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testFullJoinWithPk(): Unit = {
-    val query1 = "SELECT SUM(a2) AS a2, a1 FROM A GROUP BY a1"
-    val query2 = "SELECT SUM(b2) AS b2, b1 FROM B GROUP BY b1"
-    val query = s"SELECT a1, a2, b1, b2 FROM ($query1) FULL JOIN ($query2) ON a2 = b2"
-    util.verifyPlan(query, ExplainDetail.CHANGELOG_MODE)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |full join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testSelfJoinPlan(): Unit = {
-    util.addTableSource[(Long, String)]("src", 'key, 'v)
-    val sql =
+    val query =
       s"""
-         |SELECT * FROM (
-         |  SELECT * FROM src WHERE key = 0) src1
-         |LEFT OUTER JOIN (
-         |  SELECT * FROM src WHERE key = 0) src2
-         |ON (src1.key = src2.key AND src2.key > 10)
-       """.stripMargin
-    util.verifyPlan(sql, ExplainDetail.CHANGELOG_MODE)
+         |select a.s0, b.s2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table S, descriptor(sts), interval '10' second)) b
+         |on a.s0 = b.s0 and a.s2 > 3
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testJoinWithSort(): Unit = {
-    util.addTableSource[(Int, Int, String)]("MyTable3", 'i, 'j, 't)
-    util.addTableSource[(Int, Int)]("MyTable4", 'i, 'k)
+    val query =
+      s"""
+         |select s0, m2 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |full join
+         |table(tumble((select * from M order by m0 ASC, m2 DESC), descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2
+         |""".stripMargin
 
-    val sqlQuery =
-      """
-        |SELECT * FROM
-        |  MyTable3 FULL JOIN
-        |  (SELECT * FROM MyTable4 ORDER BY MyTable4.i DESC, MyTable4.k ASC) MyTable4
-        |  ON MyTable3.i = MyTable4.i and MyTable3.i = MyTable4.k
-      """.stripMargin
-
-    util.verifyPlan(sqlQuery)
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftOuterJoinEquiPred(): Unit = {
-    util.verifyPlan("SELECT b, y FROM t LEFT OUTER JOIN s ON a = z")
+    val query =
+      s"""
+         |select s0, m0 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftOuterJoinEquiAndLocalPred(): Unit = {
-    util.verifyPlan("SELECT b, y FROM t LEFT OUTER JOIN s ON a = z AND b < 2")
+    val query =
+      s"""
+         |select s0, m0 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2 and s0 > 5
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testLeftOuterJoinEquiAndNonEquiPred(): Unit = {
-    util.verifyPlan("SELECT b, y FROM t LEFT OUTER JOIN s ON a = z AND b < x")
+    val query =
+      s"""
+         |select s0, m0 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |left join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2 and s0 <> m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightOuterJoinEquiPred(): Unit = {
-    util.verifyPlan("SELECT b, y FROM t RIGHT OUTER JOIN s ON a = z")
+    val query =
+      s"""
+         |select s0, m0 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightOuterJoinEquiAndLocalPred(): Unit = {
-    util.verifyPlan("SELECT b, x FROM t RIGHT OUTER JOIN s ON a = z AND x < 2")
+    val query =
+      s"""
+         |select s0, m0 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2 and s0 > 5
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 
   @Test
   def testRightOuterJoinEquiAndNonEquiPred(): Unit = {
-    util.verifyPlan("SELECT b, y FROM t RIGHT OUTER JOIN s ON a = z AND b < x")
+    val query =
+      s"""
+         |select s0, m0 from
+         |table(tumble(table S, descriptor(sts), interval '10' second)) a
+         |right join
+         |table(tumble(table M, descriptor(mts), interval '10' second)) b
+         |on a.s2 = b.m2 and s0 <> m2
+         |""".stripMargin
+    util.verifyPlan(query)
   }
 }

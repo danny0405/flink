@@ -19,13 +19,16 @@
 package org.apache.flink.table.planner.plan.utils
 
 import org.apache.flink.table.api.{TableConfig, TableException}
+import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.codegen.{CodeGeneratorContext, ExprCodeGenerator, FunctionCodeGenerator}
 import org.apache.flink.table.planner.plan.`trait`.FlinkRelDistribution
 import org.apache.flink.table.planner.plan.nodes.FlinkConventions
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition
+import org.apache.flink.table.runtime.operators.join.stream.state.JoinInputSideSpec
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo
 import org.apache.flink.table.types.logical.LogicalType
 
-import org.apache.calcite.plan.{RelOptUtil, RelTraitSet}
+import org.apache.calcite.plan.{RelOptCluster, RelOptUtil, RelTraitSet}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rel.core.{Join, JoinInfo}
 import org.apache.calcite.rex.{RexBuilder, RexNode}
@@ -34,6 +37,7 @@ import org.apache.calcite.util.mapping.IntPair
 
 import java.util
 
+import scala.collection.JavaConversions._
 import scala.collection.mutable
 
 /**
@@ -152,5 +156,71 @@ object JoinUtil {
     inputTraitSets
       .replace(FlinkConventions.STREAM_PHYSICAL)
       .replace(distribution)
+  }
+
+  def analyzeJoinInput(
+      cluster: RelOptCluster,
+      input: RelNode,
+      keyPairs: List[IntPair],
+      isLeft: Boolean): JoinInputSideSpec = {
+    val uniqueKeys = cluster.getMetadataQuery.getUniqueKeys(input)
+    if (uniqueKeys == null || uniqueKeys.isEmpty) {
+      JoinInputSideSpec.withoutUniqueKey()
+    } else {
+      val inRowType = InternalTypeInfo.of(FlinkTypeFactory.toLogicalRowType(input.getRowType))
+      val joinKeys = if (isLeft) {
+        keyPairs.map(_.source).toArray
+      } else {
+        keyPairs.map(_.target).toArray
+      }
+      val uniqueKeysContainedByJoinKey = uniqueKeys
+          .filter(uk => uk.toArray.forall(joinKeys.contains(_)))
+          .map(_.toArray)
+          .toArray
+      if (uniqueKeysContainedByJoinKey.nonEmpty) {
+        // join key contains unique key
+        val smallestUniqueKey = getSmallestKey(uniqueKeysContainedByJoinKey)
+        val uniqueKeySelector = KeySelectorUtil.getRowDataSelector(smallestUniqueKey, inRowType)
+        val uniqueKeyTypeInfo = uniqueKeySelector.getProducedType
+        JoinInputSideSpec.withUniqueKeyContainedByJoinKey(uniqueKeyTypeInfo, uniqueKeySelector)
+      } else {
+        val smallestUniqueKey = getSmallestKey(uniqueKeys.map(_.toArray).toArray)
+        val uniqueKeySelector = KeySelectorUtil.getRowDataSelector(smallestUniqueKey, inRowType)
+        val uniqueKeyTypeInfo = uniqueKeySelector.getProducedType
+        JoinInputSideSpec.withUniqueKey(uniqueKeyTypeInfo, uniqueKeySelector)
+      }
+    }
+  }
+
+  private def getSmallestKey(keys: Array[Array[Int]]): Array[Int] = {
+    var smallest = keys.head
+    for (key <- keys) {
+      if (key.length < smallest.length) {
+        smallest = key
+      }
+    }
+    smallest
+  }
+
+  def inputUniqueKeyContainsJoinKey(
+      cluster: RelOptCluster,
+      input: RelNode,
+      keyPairs: List[IntPair],
+      isLeft: Boolean): Boolean = {
+    val inputUniqueKeys = cluster.getMetadataQuery.getUniqueKeys(input)
+    if (inputUniqueKeys != null) {
+      val joinKeys = if (isLeft) {
+        // left input
+        keyPairs.map(_.source).toArray
+      } else {
+        // right input
+        keyPairs.map(_.target).toArray
+      }
+      inputUniqueKeys.exists {
+        uniqueKey => joinKeys.forall(uniqueKey.toArray.contains(_))
+      }
+    } else {
+      false
+    }
   }
 }
