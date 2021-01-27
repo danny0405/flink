@@ -48,6 +48,8 @@ import org.joda.time.DateTime;
 import org.joda.time.DateTimeFieldType;
 import org.joda.time.LocalDate;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Array;
@@ -81,6 +83,11 @@ public class AvroRowDataDeserializationSchema implements DeserializationSchema<R
 	 * Used for converting Date type.
 	 */
 	private static final int MILLIS_PER_DAY = 86400_000;
+
+	/**
+	 * Explicit avro schema string.
+	 */
+	private final String schema;
 
 	/**
 	 * Logical type describing the result type.
@@ -126,6 +133,21 @@ public class AvroRowDataDeserializationSchema implements DeserializationSchema<R
 	public AvroRowDataDeserializationSchema(
 			RowType rowType,
 			TypeInformation<RowData> typeInfo) {
+		this(null, rowType, typeInfo);
+	}
+
+	/**
+	 * Creates a Avro deserialization schema for the given logical type.
+	 *
+	 * @param schema   Explicit avro schema string
+	 * @param rowType  The logical type used to deserialize the data.
+	 * @param typeInfo The TypeInformation to be used by {@link AvroRowDataDeserializationSchema#getProducedType()}.
+	 */
+	public AvroRowDataDeserializationSchema(
+			@Nullable String schema,
+			RowType rowType,
+			TypeInformation<RowData> typeInfo) {
+		this.schema = schema;
 		this.rowType = rowType;
 		this.typeInfo = typeInfo;
 		this.runtimeConverter = createRowConverter(rowType);
@@ -133,7 +155,9 @@ public class AvroRowDataDeserializationSchema implements DeserializationSchema<R
 
 	@Override
 	public void open(InitializationContext context) throws Exception {
-		final Schema schema = AvroSchemaConverter.convertToSchema(rowType);
+		final Schema schema = this.schema == null
+				? AvroSchemaConverter.convertToSchema(rowType)
+				: new Schema.Parser().parse(this.schema);
 		this.record = new GenericData.Record(schema);
 		this.datumReader = new SpecificDatumReader<>(schema);
 		this.inputStream = new MutableByteArrayInputStream();
@@ -170,8 +194,9 @@ public class AvroRowDataDeserializationSchema implements DeserializationSchema<R
 			return false;
 		}
 		final AvroRowDataDeserializationSchema that = (AvroRowDataDeserializationSchema) o;
-		return Objects.equals(rowType, that.rowType) &&
-			Objects.equals(typeInfo, that.typeInfo);
+		return Objects.equals(rowType, that.rowType)
+				&& Objects.equals(schema, that.schema)
+				&& Objects.equals(typeInfo, that.typeInfo);
 	}
 
 	@Override

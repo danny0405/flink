@@ -90,6 +90,27 @@ public class AvroFormatFactoryTest extends TestLogger {
 		assertEquals(expectedSer, actualSer);
 	}
 
+	@Test
+	public void testSerializeWithExplicitSchema() {
+		final AvroRowDataDeserializationSchema expectedDeser =
+				new AvroRowDataDeserializationSchema("123", ROW_TYPE, new RowDataTypeInfo(ROW_TYPE));
+
+		final Map<String, String> options = getAllOptions();
+		options.put("avro.schema", "123");
+
+		final DynamicTableSource actualSource = createTableSource(options);
+		assert actualSource instanceof TestDynamicTableFactory.DynamicTableSourceMock;
+		TestDynamicTableFactory.DynamicTableSourceMock scanSourceMock =
+				(TestDynamicTableFactory.DynamicTableSourceMock) actualSource;
+
+		DeserializationSchema<RowData> actualDeser = scanSourceMock.valueFormat
+				.createRuntimeDecoder(
+						ScanRuntimeProviderContext.INSTANCE,
+						SCHEMA.toRowDataType());
+
+		assertEquals(expectedDeser, actualDeser);
+	}
+
 	// ------------------------------------------------------------------------
 	//  Utilities
 	// ------------------------------------------------------------------------

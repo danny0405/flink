@@ -37,6 +37,7 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -63,7 +64,9 @@ public class AvroFormatFactory implements
 				final RowType rowType = (RowType) producedDataType.getLogicalType();
 				final TypeInformation<RowData> rowDataTypeInfo =
 						(TypeInformation<RowData>) context.createTypeInformation(producedDataType);
-				return new AvroRowDataDeserializationSchema(rowType, rowDataTypeInfo);
+				final String avroSchema =
+						formatOptions.getOptional(AvroOptions.SCHEMA).orElse(null);
+				return new AvroRowDataDeserializationSchema(avroSchema, rowType, rowDataTypeInfo);
 			}
 
 			@Override
@@ -107,6 +110,8 @@ public class AvroFormatFactory implements
 
 	@Override
 	public Set<ConfigOption<?>> optionalOptions() {
-		return Collections.emptySet();
+		Set<ConfigOption<?>> set = new HashSet<>();
+		set.add(AvroOptions.SCHEMA);
+		return set;
 	}
 }
